@@ -1,0 +1,5 @@
+pandas
+plotly
+setuptools
+wheel
+pickle-mixin

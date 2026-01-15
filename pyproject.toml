@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dijkzicht"
+version = "0.1.0"
+description = "Dijkzicht je Dijk - Dike profile analysis and visualization"
+authors = [
+    { name = "scheldestromen" }
+]
+requires-python = ">=3.7"
+dependencies = [
+    "pandas",
+    "plotly"
+]
