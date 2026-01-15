@@ -1,6 +1,5 @@
 import os
 import logging
-# import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -20,8 +19,25 @@ import PIL.Image
 
 from geoprofile import Section
 
+PLOT_KWARGS = {
+    "coneResistance": {"line_color": "black", "factor": 2},
+    "frictionRatioComputed": {"line_color": "red", "factor": 4},
+    "porePressureU2": {"line_color": "blue", "factor": 100},
+}
+
 
 def profile_line_from_dps(gdf_hm, dp_list, distance_col='HMTAFSTNL'):
+    """
+    Create a LineString profile from a list of dike poles (dp) in a GeoDataFrame.
+    Returns the LineString and optionally the starting distance value.
+    Args:
+        gdf_hm: GeoDataFrame with dike pole data
+        dp_list: List of dike pole numbers
+        distance_col: Column name for distance reference
+    Returns:
+        line: LineString object
+        x0: Starting distance value (if distance_col is provided)
+    """
     gdf_hm_subset = gdf_hm[gdf_hm['dp'].isin(dp_list)]
     xy_list = list(zip(gdf_hm_subset['x'], gdf_hm_subset['y']))
     line = LineString(xy_list)
@@ -33,6 +49,13 @@ def profile_line_from_dps(gdf_hm, dp_list, distance_col='HMTAFSTNL'):
 
 
 def plot_pbs_in_fig(fig, df_metainfo, dp_list):
+    """
+    Plot peilbuizen (groundwater standpipes) in a Plotly figure for a given dike pole range.
+    Args:
+        fig: Plotly figure object
+        df_metainfo: DataFrame with peilbuis metadata
+        dp_list: List of dike pole numbers
+    """
     df_metainfo_plot = df_metainfo[df_metainfo.dp.between(
         min(dp_list), max(dp_list))]
     for pos, group in df_metainfo_plot.groupby('position'):
@@ -45,14 +68,27 @@ def plot_pbs_in_fig(fig, df_metainfo, dp_list):
         )
 
 
-plot_kwargs = {
-    "coneResistance": {"line_color": "black", "factor": 2},
-    "frictionRatioComputed": {"line_color": "red", "factor": 4},
-    "porePressureU2": {"line_color": "blue", "factor": 100},
-}
-
-
 def plot_geoprofile(cols,  gdf_hm, dp_list,  df_metainfo=None, buffer=100, projectname=None, width=1900, height=937, dp_format='.1f', title_suffix='', profile_line=None, plot_path=None):
+    """
+    Plot a geoprofile along a dike trajectory using soil and groundwater data.
+    Args:
+        cols: List of geoprofile columns
+        gdf_hm: GeoDataFrame with dike pole data
+        dp_list: List of dike pole numbers
+        df_metainfo: DataFrame with peilbuis metadata (optional)
+        buffer: Buffer distance for map plotting
+        projectname: Name for output files
+        width: Width of output image
+        height: Height of output image
+        dp_format: Format for dike pole labels
+        title_suffix: Suffix for plot title
+        profile_line: Optional LineString for profile
+        plot_path: Path for saving plots
+    Returns:
+        fig: Plotly figure object
+        profile: Section object
+    """
+    # fix profile
     if profile_line is None:
         profile_line, x0 = profile_line_from_dps(gdf_hm, dp_list)
     else:
@@ -64,6 +100,8 @@ def plot_geoprofile(cols,  gdf_hm, dp_list,  df_metainfo=None, buffer=100, proje
         buffer=buffer,
         reproject=True,
     )
+
+    # plot map
     axis = profile.plot_map(
         add_basemap=True, add_tags=False, tag_type="index", show_all=True
     )
@@ -98,17 +136,18 @@ def plot_geoprofile(cols,  gdf_hm, dp_list,  df_metainfo=None, buffer=100, proje
             color='white',
             fontweight='bold',
         )
-    axis.legend()
     plt.savefig(f"{plot_path}{projectname}_map.png")
 
+    # plot section
     fig = profile.plot(
-        plot_kwargs=plot_kwargs,
+        plot_kwargs=PLOT_KWARGS,
         hue="uniform",
         fillpattern=False,
         surface_level=False,
         groundwater_level=False,
         x0=x0,
     )
+    # plot standpipes
     if df_metainfo is not None:
         plot_pbs_in_fig(fig, df_metainfo, dp_list)
     fig.update_xaxes(
@@ -123,63 +162,21 @@ def plot_geoprofile(cols,  gdf_hm, dp_list,  df_metainfo=None, buffer=100, proje
         fig, filename=f"{plot_path}{projectname}_webpage.html")
     fig.write_image(f"{plot_path}{projectname}_profile.png",
                     width=width, height=height)
+
     return fig, profile
 
 
-def plot_areaal_kenmerken(df_areaal=None, fn_areaal=r'..\data\areaal\traject-kenmerken.xlsx', plot_y_0=100, min_dp_text=20, lengend_ncols=5):
-    if df_areaal is None:
-        df_areaal = pd.read_excel(
-            fn_areaal,
-            skiprows=1,
-            sheet_name='data'
-        )
-        df_areaal.drop(df_areaal.loc[df_areaal.show != 1].index, inplace=True)
-    fig, ax = plt.subplots(1, figsize=(15, 4))
-    plot_ys = []
-    plot_labels = []
-    for category, df_plot in df_areaal.groupby('category'):
-        plot_ys.append(plot_y_0 - df_plot.plot_y.iloc[0])
-        plot_labels.append(category)
-        for index, row in df_plot.iterrows():
-            ax.plot(
-                [row.dp_min, row.dp_max],
-                [plot_ys[-1]]*2,
-                lw=row.lw,
-                ls=row.ls,
-                color=row.color,
-                marker='|',
-                markersize=row.lw*1,
-                markeredgecolor='k',
-                solid_capstyle="butt",
-                label=category+': '+row.label,
-            )
-            if (row.dp_max - row.dp_min) > min_dp_text:
-                ax.text(
-                    np.mean([row.dp_min, row.dp_max]),
-                    plot_ys[-1]+0.1,
-                    row.label[:30],
-                    ha='center',
-                    va='bottom',
-                    fontsize=8,
-                )
-    ax.set_yticks(plot_ys, plot_labels)
-    ax.set_xlim([df_areaal.dp_min.min()-0.5, df_areaal.dp_max.max()+0.5])
-    ax.set_xlabel('dp')
-    ax.set_ylim(top=ax.get_ylim()[1])
-    for x in np.arange(730, 1080, 10):
-        ax.axvline(x=x, lw=0.2, color='gray')
-    wapy.simple_legend(
-        ax,
-        loc=(0, 1),
-        frameon=False,
-        ncols=lengend_ncols,
-        fontsize="x-small",
-    )
-    wapy.add_footer_to_fig(fig, r'plots_system\kenmerken.png')
-    return fig, ax, df_areaal
-
-
 def update_offset(fn_img, transform_matrix, replace_search='_flipped', replace_with='_flipped_offset'):
+    """
+    Update the affine transform matrix with an offset from a file, if available.
+    Args:
+        fn_img: Filename of image
+        transform_matrix: Affine transform matrix
+        replace_search: String to search in filename
+        replace_with: String to replace in filename
+    Returns:
+        transform_matrix: Updated affine transform matrix
+    """
     if os.path.exists(fn_img.replace(replace_search, replace_with)):
         df_offset = pd.read_csv(
             fn_img.replace(replace_search, replace_with),
@@ -204,6 +201,15 @@ def update_offset(fn_img, transform_matrix, replace_search='_flipped', replace_w
 
 
 def select_and_plot_deltaversterking(dp_center, fig, df_meta_deltaversterking):
+    """
+    Select the closest dike pole with Deltaversterking and plot its background in the figure.
+    Args:
+        dp_center: Central dike pole number
+        fig: Plotly figure object
+        df_meta_deltaversterking: DataFrame with Deltaversterking metadata
+    Returns:
+        closest_dp_dsn: Closest dike pole with Deltaversterking
+    """
 
     # find closest dp in df_meta_deltaversterking
     df_met_dsn = df_meta_deltaversterking.dropna(subset=['dsn_file_tif'])
@@ -213,12 +219,24 @@ def select_and_plot_deltaversterking(dp_center, fig, df_meta_deltaversterking):
                         closest_dp_dsn, 'dsn_file_tif'].values[0]
     logging.debug(
         f'Closest dp with Deltaversterking to {dp_center} is {closest_dp_dsn}, fn: {fn[-20:]}')
+
     plot_deltaversterking_background(fig, fn, closest_dp_dsn)
 
     return closest_dp_dsn
 
 
 def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1, region='Os'):
+    """
+    Select and plot the surface level profiles  in the specified region.
+    Args:
+        dp_center: Central dike pole number
+        fig: Plotly figure object
+        df_profiles: DataFrame with surface level profiles
+        delta_dp: Range around central dike pole
+        region: Region name
+    Returns:
+        closest_dp_profile: Closest dike pole with surface level profile
+    """
 
     # select data
     df_profiles_subset = df_profiles[
@@ -262,7 +280,23 @@ def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1,
     return closest_dp_profile
 
 
-def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, df_gwl, delta_dp=1, plot_path=None):
+def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, df_gwl, delta_dp=1, plot_path=None, xmin=30, xmax=30):
+    """
+    Create a Plotly figure for a specific dike pole, including soil, surface, and groundwater profiles.
+    Args:
+        dp_center: Central dike pole number
+        df_meta_deltaversterking: DataFrame with Deltaversterking metadata
+        geoprofile_cols: List of geoprofile columns
+        df_profiles: DataFrame with surface level profiles
+        df_gwl: DataFrame with groundwater levels
+        delta_dp: Range around central dike pole
+        plot_path: Path for saving plot
+        xmin: Minimum x-axis value
+        xmax: Maximum x-axis value
+    Returns:
+        fig: Plotly figure object
+        fn: Filename of saved plot
+    """
 
     # create figure
     fig = make_subplots(
@@ -311,7 +345,7 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
     fig.update_layout(
         title_text=f"profiel rondom dp{dp_center} ± {delta_dp*100:0.0f}m, tekening Deltaversterking bij dp{closest_dp_dsn} ({(closest_dp_dsn-dp_center)*100:+0.0f}m)")
     fig.update_xaxes(
-        range=[-30, 30], title_text="afstand tot referentie lijn [m]")
+        range=[-xmin, xmax], title_text="afstand tot referentie lijn [m]")
     # fig.update_xaxes(autorange="reversed")
     fn = fr"{plot_path}\profiel_dp{dp_center}__plusmin{delta_dp}.html"
     pio.write_html(fig, file=fn, auto_open=True)
@@ -320,6 +354,13 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
 
 
 def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
+    """
+    Plot geoprofile columns in a Plotly figure, highlighting specified dike poles.
+    Args:
+        geoprofile_cols_subset: List of geoprofile columns to plot
+        figure: Plotly figure object
+        dp_highlight: Dike pole(s) to highlight
+    """
     if figure is None:
         figure = make_subplots(
             rows=1,
@@ -351,8 +392,6 @@ def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
             profile=True,
         )
         # plot marker at z
-        import plotly.graph_objects as go
-        # Only add name for the first item to show legend entry once
         show_name = plotted_x == [plot_x]
         figure.add_trace(
             go.Scatter(
@@ -384,7 +423,13 @@ def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
 
 
 def plot_deltaversterking_background(figure, fn, dp=None):
-
+    """
+    Add Deltaversterking raster background to a Plotly figure.
+    Args:
+        figure: Plotly figure object
+        fn: Filename of raster image
+        dp: Dike pole number (optional)
+    """
     with rasterio.open(fn) as src:
         bounds = src.bounds
         transform_matrix = src.transform
@@ -427,6 +472,17 @@ def plot_deltaversterking_background(figure, fn, dp=None):
 
 
 def dp_to_color(dp, dp_center, colors_below=["red", "darkred", "tomato", "firebrick"], color_center="green", colors_above=["blue", "royalblue", "deepskyblue", "navy"]):
+    """
+    Assign a color to a dike pole based on its position relative to the center.
+    Args:
+        dp: Dike pole number
+        dp_center: Central dike pole number
+        colors_below: Colors for dike poles below center
+        color_center: Color for center dike pole
+        colors_above: Colors for dike poles above center
+    Returns:
+        color: Assigned color string
+    """
     if dp == dp_center:
         return color_center
     else:
@@ -442,6 +498,13 @@ def dp_to_color(dp, dp_center, colors_below=["red", "darkred", "tomato", "firebr
 
 
 def plot_pbs_in_fig(fig, df_metainfo, dp_center):
+    """
+    Plot peilbuizen (groundwater standpipes) in a Plotly figure for a specific dike pole.
+    Args:
+        fig: Plotly figure object
+        df_metainfo: DataFrame with peilbuis metadata
+        dp_center: Central dike pole number
+    """
     for pos, group in df_metainfo.groupby('position'):
         for _, row in group.iterrows():
             color = dp_to_color(row.dp, dp_center, color_center='darkgreen')
