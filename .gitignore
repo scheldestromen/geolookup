@@ -1,0 +1,12 @@
+# Ignore all PDF, TXT, PNG, and JPG files
+*.pdf
+*.PDF
+*.txt
+*.TXT
+*.png
+*.PNG
+*.jpg
+*.JPG
+*.pyc
+*.html
+thumbs.db
