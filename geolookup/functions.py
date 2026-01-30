@@ -297,7 +297,7 @@ def update_offset(fn_img, transform_matrix, replace_search='_flipped', replace_w
     return transform_matrix
 
 
-def select_and_plot_deltaversterking(dp_center, fig, df_meta_deltaversterking):
+def select_and_plot_deltaversterking(dp_center, fig, df_meta_deltaversterking, fig_row=1, fig_col=1):
     """
     Select the closest dike pole with Deltaversterking and plot its background in the figure.
     Args:
@@ -317,12 +317,13 @@ def select_and_plot_deltaversterking(dp_center, fig, df_meta_deltaversterking):
     logging.debug(
         f'Closest dp with Deltaversterking to {dp_center} is {closest_dp_dsn}, fn: {fn[-20:]}')
 
-    plot_deltaversterking_background(fig, fn, closest_dp_dsn)
+    plot_deltaversterking_background(
+        fig, fn, closest_dp_dsn, fig_row=fig_row, fig_col=fig_col)
 
     return closest_dp_dsn
 
 
-def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1, region='Os'):
+def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1, region='Os', fig_row=1, fig_col=1):
     """
     Select and plot the surface level profiles  in the specified region.
     Args:
@@ -369,6 +370,8 @@ def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1,
                 name=f"profiel dp{row['dp']:.1f}",
                 line=dict(
                     width=4 if row['dp'] == closest_dp_profile else 2, color=line_color),
+                row=fig_row,
+                col=fig_col,
             )
         else:
             logging.debug(
@@ -377,7 +380,77 @@ def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1,
     return closest_dp_profile
 
 
-def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, delta_dp=1, width=1900, height=937, region='Os', xmin=-30, xmax=30, plot_path=r'plot\\'):
+def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, delta_dp=1, width=1900, height=937, region='Os', xmin=-30, xmax=30, plot_path=r'plot\\', plot_gwl=False):
+
+    # prepare groundwater data
+    oc_gwl_plot = oc_gwl.loc[oc_gwl.dp.between(
+        dp_center - delta_dp, dp_center + delta_dp
+    ) & (oc_gwl.region == region)].copy()
+
+    if plot_gwl:
+        fig_rows = 2
+        colors = ['red', 'blue', 'limegreen', 'orange',
+                  'purple', 'brown', 'pink', 'gray']
+        for i, (index, row) in enumerate(oc_gwl_plot.iterrows()):
+            oc_gwl_plot.at[index, 'plot_color'] = colors[i % len(colors)]
+    else:
+        fig_rows = 1
+
+    # create figure
+    fig = make_subplots(
+        rows=fig_rows,
+        cols=1,
+        y_title="(m NAP)",
+        shared_yaxes=True,
+        horizontal_spacing=0.01,
+    )
+
+    plot_section_for_dp(fig, dp_center=dp_center, df_meta_deltaversterking=df_meta_deltaversterking, geoprofile_cols=geoprofile_cols,
+                        df_profiles=df_profiles, oc_gwl=oc_gwl_plot, delta_dp=delta_dp, region=region, xmin=xmin, xmax=xmax, fig_row=1, fig_col=1)
+
+    if plot_gwl:
+        # plot observations in separate subplot
+        for index, row in oc_gwl_plot.iterrows():
+            # mean in upper plot
+            fig.add_trace(
+                go.Scatter(
+                    x=[row.dp - 0.3, row.dp + 0.3],
+                    y=[row.obs.gwl_mnap.mean()]*2,
+                    mode="lines",
+                    line=dict(color='black', width=4),
+                    # name=f'peilbuis {row.position}<BR>dp{row.dp}, {row.timeseries_id}',
+                ),
+                row=1,
+                col=1,
+            )
+            # individual observations in lower plot
+            fig.add_trace(
+                go.Scatter(
+                    x=row.obs.index,
+                    y=row.obs.gwl_mnap,
+                    mode="lines",
+                    line=dict(color=row['plot_color'], width=2),
+                    name=f'peilbuis {row.position}<BR>dp{row.dp}, {row.timeseries_id}',
+                ),
+                row=2,
+                col=1,
+            )
+            fig.update_xaxes(
+                range=[row.obs.index.min(), row.obs.index.max()],
+                row=2,
+                col=1,
+            )
+        fig.update_yaxes(title_text="Grondwaterstand (m NAP)", row=2, col=1)
+
+    fn = fr"{plot_path}\profiel_dp{dp_center}__plusmin{delta_dp}.html"
+    pio.write_html(fig, file=fn, auto_open=True)
+    fig.write_image(fn.replace('.html', '.png'),
+                    width=width, height=height)
+    return fig, fn
+
+
+# def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, delta_dp=1, width=1900, height=937, region='Os', xmin=-30, xmax=30, plot_path=r'plot\\'):
+def plot_section_for_dp(fig, dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, delta_dp=1, region='Os', xmin=-30, xmax=30, fig_row=1, fig_col=1):
     """
     Create a Plotly figure for a specific dike pole, including soil, surface, and groundwater profiles.
     Args:
@@ -395,17 +468,8 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
         fn: Filename of saved plot
     """
 
-    # create figure
-    fig = make_subplots(
-        rows=1,
-        cols=1,
-        y_title="(m NAP)",
-        shared_yaxes=True,
-        horizontal_spacing=0.01,
-    )
-
     closest_dp_dsn = select_and_plot_deltaversterking(
-        dp_center, fig, df_meta_deltaversterking)
+        dp_center, fig, df_meta_deltaversterking, fig_row=fig_row, fig_col=fig_col)
 
     # PLOT SOIL DATA
 
@@ -428,7 +492,7 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
 
     # PLOT SURFACE LEVEL PROFILE
     closest_dp_profile = select_and_plot_surfacelevelprofile(
-        dp_center, fig, df_profiles, delta_dp=delta_dp, region=region)
+        dp_center, fig, df_profiles, delta_dp=delta_dp, region=region, fig_row=fig_row, fig_col=fig_col)
 
     # PLOT GROUNDWATER STANDPIPES
     plot_standpipes_in_fig(
@@ -443,16 +507,18 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
 
     # LAYOUT ADJUSTMENTS
     fig.update_layout(
-        title_text=f"profiel rondom dp{dp_center} ± {delta_dp*100:0.0f}m, tekening Deltaversterking bij dp{closest_dp_dsn} ({(closest_dp_dsn-dp_center)*100:+0.0f}m)")
+        title_text=f"profiel rondom dp{dp_center} ± {delta_dp*100:0.0f}m, tekening Deltaversterking bij dp{closest_dp_dsn} ({(closest_dp_dsn-dp_center)*100:+0.0f}m)",
+        # TO DO: selection of subplot via row and col not accepted
+        # row=fig_row, col=fig_col
+    )
     fig.update_xaxes(
-        range=[xmin, xmax], title_text="afstand tot referentie lijn [m]")
+        range=[xmin, xmax],
+        title_text="afstand tot referentie lijn [m]",
+        # TO DO: selection of subplot via row and col not accepted
+        # row=fig_row,
+        # col=fig_col
+    )
     # fig.update_xaxes(autorange="reversed")
-    fn = fr"{plot_path}\profiel_dp{dp_center}__plusmin{delta_dp}.html"
-    pio.write_html(fig, file=fn, auto_open=True)
-    fig.write_image(fn.replace('.html', '.png'),
-                    width=width, height=height)
-
-    return fig, fn
 
 
 def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
@@ -524,7 +590,7 @@ def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
         )
 
 
-def plot_deltaversterking_background(figure, fn, dp=None):
+def plot_deltaversterking_background(figure, fn, dp=None, fig_row=1, fig_col=1):
     """
     Add Deltaversterking raster background to a Plotly figure.
     Args:
@@ -554,14 +620,14 @@ def plot_deltaversterking_background(figure, fn, dp=None):
     buffer = BytesIO()
     pil_img.save(buffer, format="PNG")
     img_bytes = buffer.getvalue()
-    img_base64 = "data:image/png;base64," + \
-        base64.b64encode(img_bytes).decode()
+    img_base64 = "data:image/png;base64,"
+    base64.b64encode(img_bytes).decode()
+
+    print(fig_row, fig_col)
 
     figure.add_layout_image(
         dict(
             source=img_base64,
-            xref="x",
-            yref="y",
             x=x_min,
             y=y_max,
             sizex=x_max - x_min,
@@ -569,6 +635,8 @@ def plot_deltaversterking_background(figure, fn, dp=None):
             sizing="stretch",
             opacity=0.5,
             layer="below",
+            xref=f"x{fig_row}",  # TODO: assumes one column, multiple rows
+            yref=f"y{fig_row}",
         )
     )
 
@@ -599,7 +667,7 @@ def dp_to_color(dp, dp_center, colors_below=["red", "darkred", "tomato", "firebr
         return colors[color_index]
 
 
-def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='green', method='geoprofile'):
+def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='green', method='geoprofile', fig_row=1, fig_col=1):
     """
     Plot groundwater standpipes in a Plotly figure for a given dike pole range.
     Args:
@@ -615,22 +683,7 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
         logging.info(
             f'Plotting {len(oc)} standpipes in figure, method={method}.')
 
-    if method == 'geoprofile_old':
-        logging.debug(f'length oc: {len(oc)}')
-        # logging.debug(f'oc position values: {oc.position.unique()}')
-        # for pos, group in oc.groupby('position'):
-        #    for index, row in group.iterrows():
-        for index, row in oc.iterrows():
-            fig.add_trace(
-                go.Scatter(
-                    x=[row.distance_to_ref, row.distance_to_ref],
-                    y=[row.screen_top, row.screen_bottom],
-                    mode="lines",
-                    line=dict(color='limegreen', width=10),
-                    name=f'peilbuis {row.position}<BR>dp{row.dp}, {row.timeseries_id}',
-                )
-            )
-    elif method == 'by_dp':
+    if method == 'by_dp':
         logging.debug(f'length oc: {len(oc)}')
         logging.debug(f'oc position values: {oc.position.unique()}')
         for pos, group in oc.groupby('position'):
@@ -640,9 +693,13 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                         x=[row.distance_to_ref, row.distance_to_ref],
                         y=[row.screen_top, row.screen_bottom],
                         mode="lines",
-                        line=dict(color='limegreen', width=10),
+                        line=dict(color=row.plot_color, width=10) if hasattr(
+                            row, 'plot_color') else dict(color='limegreen', width=10),
                         name=f'peilbuis {row.position}<BR>dp{row.dp}, {row.timeseries_id}',
-                    )
+
+                    ),
+                    row=fig_row,
+                    col=fig_col,
                 )
 
     elif method == 'geoprofile':
@@ -666,9 +723,13 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                     x=[row.dp * 100 + offset]*2,
                     y=[row.screen_top, row.screen_bottom],
                     mode="lines",
-                    line=dict(color=color, width=10),
+                    line=dict(color=row.plot_color, width=10) if hasattr(
+                        row, 'plot_color') else dict(color=color, width=10),
                     name=f'filter {row.position}<BR>dp{row.dp}, {row.timeseries_id}',
-                )
+
+                ),
+                row=fig_row,
+                col=fig_col,
             )
             fig.add_trace(
                 go.Scatter(
@@ -676,9 +737,13 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                     x=[row.dp * 100 + offset]*2,
                     y=[row.screen_top, row.tube_top],
                     mode="lines",
-                    line=dict(color=color, width=1),
+                    line=dict(color=row.plot_color, width=1) if hasattr(
+                        row, 'plot_color') else dict(color=color, width=1),
                     showlegend=False,
-                )
+
+                ),
+                row=fig_row,
+                col=fig_col,
             )
             print(row.dp * 100 + offset, row.tube_top)
             fig.add_scatter(
@@ -687,11 +752,14 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                 y=[row.tube_top],
                 mode='markers',
                 marker=dict(
-                    color=color,
+                    color=row.plot_color if hasattr(
+                        row, 'plot_color') else color,
                     size=12,
                     symbol='diamond'
                 ),
-                name=f'peilbuis {row.position}<BR>dp{row.dp}, bovenkant buis'
+                name=f'peilbuis {row.position}<BR>dp{row.dp}, bovenkant buis',
+                row=fig_row,
+                col=fig_col,
             )
     else:
         logging.warning(
