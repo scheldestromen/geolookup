@@ -16,6 +16,7 @@ import rasterio
 import base64
 from io import BytesIO
 import PIL.Image
+from datetime import datetime
 
 from geoprofile import Section
 
@@ -315,11 +316,19 @@ def select_and_plot_deltaversterking(dp_center, fig, df_meta_deltaversterking, f
         df_met_dsn.dp - dp_center).abs().argsort()[:1]].values[0]
     fn = df_met_dsn.loc[df_met_dsn.dp ==
                         closest_dp_dsn, 'dsn_file_tif'].values[0]
+    if 'x_offset' in df_meta_deltaversterking.columns:
+        x_offset = df_met_dsn.loc[df_met_dsn.dp ==
+                                  closest_dp_dsn, 'x_offset'].values[0]
+        if pd.notnull(x_offset):
+            pass
+        else:
+            x_offset = 0
+
     logging.debug(
-        f'Closest dp with Deltaversterking to {dp_center} is {closest_dp_dsn}, fn: {fn[-20:]}')
+        f'Closest dp with Deltaversterking to {dp_center} is {closest_dp_dsn}, fn: {fn[-20:]}, x_offset: {x_offset}')
 
     plot_deltaversterking_background(
-        fig, fn, closest_dp_dsn, fig_row=fig_row, fig_col=fig_col)
+        fig, fn, closest_dp_dsn, fig_row=fig_row, fig_col=fig_col, x_offset=x_offset)
 
     return closest_dp_dsn
 
@@ -381,7 +390,7 @@ def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1,
     return closest_dp_profile
 
 
-def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, df_gmws=None, delta_dp=1, width=1900, height=1200, region='Os', xmin=-30, xmax=20, plot_path=r'plot\\', plot_gwl=False, ylims_upper=None):
+def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, df_gmw=None, delta_dp=1, width=1900, height=1200, region='Os', xmin=-30, xmax=20, plot_path=r'plot\\', plot_gwl=False, ylims_upper=None, auto_open=True):
 
     # prepare groundwater data
     oc_gwl_plot = oc_gwl.loc[oc_gwl.dp.between(
@@ -407,20 +416,20 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
     plot_section_for_dp(fig, dp_center=dp_center, df_meta_deltaversterking=df_meta_deltaversterking, geoprofile_cols=geoprofile_cols,
                         df_profiles=df_profiles, oc_gwl=oc_gwl_plot, delta_dp=delta_dp, region=region, xmin=xmin, xmax=xmax, fig_row=1, fig_col=1)
 
-    if df_gmws is not None:
-        df_plot = df_gmws.loc[df_gmws.dp.between(
-            dp_center - delta_dp, dp_center + delta_dp) & (df_gmws.region == region)]
-        logging.debug(f'GMWs worden geplot, aantal: {len(df_plot)}')
+    if df_gmw is not None:
+        df_plot = df_gmw.loc[df_gmw.dp.between(
+            dp_center - delta_dp, dp_center + delta_dp) & (df_gmw.region == region)]
+        logging.debug(f'gmw worden geplot, aantal: {len(df_plot)}')
         plot_standpipes_in_fig(
             fig,
             df_plot,
             [dp_center - delta_dp, dp_center, dp_center + delta_dp],
             dp_center,
-            dp_alternative_color='purple',
-            method='by_dp',
+            dp_alternative_color='fuchsia',
+            method='by_dp_marker',
         )
     else:
-        logging.debug('GMWs worden niet geplot')
+        logging.debug('gmw worden niet geplot')
 
     if plot_gwl:
         # plot observations in separate subplot
@@ -476,8 +485,23 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
         )
     )
 
-    fn = fr"{plot_path}\profiel_dp{dp_center}__plusmin{delta_dp}.html"
-    pio.write_html(fig, file=fn, auto_open=True)
+    # Add current date and time in upper right corner
+    fig.add_annotation(
+        text=datetime.now().strftime("%d-%m-%Y %H:%M"),
+        xref="paper",
+        yref="paper",
+        x=0.99,
+        y=0.99,
+        showarrow=False,
+        font=dict(size=12, color="gray"),
+        align="right",
+        bgcolor="white",
+        bordercolor="gray",
+        borderwidth=1,
+    )
+
+    fn = fr"{plot_path}\profiel_dp{int(dp_center):04d}__plusmin{delta_dp}.html"
+    pio.write_html(fig, file=fn, auto_open=auto_open)
     fig.write_image(fn.replace('.html', '.png'),
                     width=width, height=height)
     return fig, fn
@@ -624,7 +648,7 @@ def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
         )
 
 
-def plot_deltaversterking_background(figure, fn, dp=None, fig_row=1, fig_col=1):
+def plot_deltaversterking_background(figure, fn, dp=None, fig_row=1, fig_col=1, x_offset=0):
     """
     Add Deltaversterking raster background to a Plotly figure.
     Args:
@@ -670,7 +694,7 @@ def plot_deltaversterking_background(figure, fn, dp=None, fig_row=1, fig_col=1):
             # yref=f"y{fig_row}",
             xref="x",
             yref="y",
-            x=x_min,
+            x=x_min + x_offset,
             y=y_max,
             sizex=x_max - x_min,
             sizey=y_max - y_min,
@@ -745,6 +769,28 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                     row=fig_row,
                     col=fig_col,
                 )
+    if method == 'by_dp_marker':
+        oc['screen_mid'] = oc[['screen_top', 'screen_bottom']].mean(axis=1)
+        counter = 0
+        for index, row in oc.iterrows():
+            fig.add_trace(
+                go.Scatter(
+                    x=[row.distance_to_ref],
+                    y=[row.screen_mid],
+                    mode="markers",
+                    marker=dict(
+                        size=15,
+                        symbol=["diamond", "cross", "x", "pentagon",
+                                "hexagram", "star-square", "circle-cross"][counter % 7]+"-open",
+                        line=dict(color=dp_alternative_color, width=2)
+                    ),
+                    name=row.label if hasattr(
+                        row, 'label') else f'pb {row.position} dp{row.dp} {row.filter_letter}',
+                ),
+                row=fig_row,
+                col=fig_col,
+            )
+            counter += 1
 
     elif method == 'geoprofile':
         for index, row in oc.iterrows():
