@@ -175,7 +175,7 @@ def add_points_to_map(axis, df, profile_line, buffer, dp_list, plot_col='dp', an
             )
 
 
-def plot_geoprofile(cols,  df_hm, dp_list,  oc_gwl=None, buffer=100, projectname=None, width=1900, height=937, dp_format='.1f', title_suffix='', profile_line=None, plot_path=None, ylims=None, groundwater_level=False, surface_level=False, region='Os'):
+def plot_geoprofile(cols,  df_hm, dp_list,  oc_gwl=None, buffer=100, projectname=None, width=1900, height=937, dp_format='.1f', title_suffix='', profile_line=None, plot_path=None, ylims=None, groundwater_level=False, surface_level=False, region='Os', auto_open=True):
     """
     Plot a geoprofile along a dike trajectory using soil and groundwater data.
     Args:
@@ -255,12 +255,21 @@ def plot_geoprofile(cols,  df_hm, dp_list,  oc_gwl=None, buffer=100, projectname
     if ylims is not None:
         fig.update_yaxes(range=ylims)
 
-    fig.update_layout(title_text=projectname + title_suffix)
-    _ = plotly.offline.plot(
-        fig, filename=f"{plot_path}{projectname}_webpage.html")
+    # fig.update_layout(title_text=projectname + title_suffix)
+    # _ = plotly.offline.plot(
+    #    fig, filename=f"{plot_path}{projectname}_webpage.html")
 
-    fig.write_image(f"{plot_path}{projectname}_profile.png",
-                    width=width, height=height)
+    # fig.write_image(f"{plot_path}{projectname}_profile.png",
+    #                width=width, height=height)
+
+    fig.update_layout(title_text=projectname + title_suffix)
+
+    fn = f"{plot_path}{projectname}_profile.html"
+    pio.write_html(fig, file=fn, auto_open=auto_open)
+    fig.write_image(
+        fn.replace('.html', '.png'),
+        width=width, height=height
+    )
 
     return fig, profile
 
@@ -500,7 +509,7 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
         borderwidth=1,
     )
 
-    fn = fr"{plot_path}\profiel_dp{int(dp_center):04d}__plusmin{delta_dp}.html"
+    fn = fr"{plot_path}\profiel_dp{int(dp_center):04d}__plusmin{delta_dp}_{fig_rows}plots.html"
     pio.write_html(fig, file=fn, auto_open=auto_open)
     fig.write_image(fn.replace('.html', '.png'),
                     width=width, height=height)
@@ -836,7 +845,8 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                 col=fig_col,
             )
             print(row.dp * 100 + offset, row.tube_top)
-            fig.add_scatter(
+            # fig.add_scatter(
+            fig.add_trace(
                 go.Scatter(
                     x=[row.dp * 100 + offset],
                     y=[row.tube_top],
