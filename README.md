@@ -1,5 +1,5 @@
 # dijkzicht
-Python code met zicht op je dijk
+Python code met zicht op/onder je dijk.
 
 Doel van deze repository is alleen om te laten zien hoe Plotly en GeoProfile je kan helpen om informatie rondom dijken te visualiseren en actualiseren. Waterschap Scheldestromen werkt hier aan verder. Deze repository geeft alleen een dump van de situatie half januari 2026.
 
