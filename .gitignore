@@ -11,6 +11,9 @@
 *.html
 thumbs.db
 
+# ignore large file with all groundwater observations
+oc_gmw_os_dp725-1080.pkl
+
 # ignore some demo files
 !profiel_dp0881*.*
 !profiel_dp0894*.*

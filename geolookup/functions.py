@@ -78,13 +78,22 @@ def describe_oc(
         oc,
         expected_obs_interval=10,  # interval in minutes
 ):
-    expected_obs_per_day = (24 * 60) / expected_obs_interval
-    df_period_obs_approx_years = (oc.stats.get_no_of_observations(
-    ) / (expected_obs_per_day))/365
 
-    logging.info(f'Obs Collection has {len(oc)} monitoring wells, on {oc.location.unique().size} locations. First observation {oc.stats.dates_first_obs.min().strftime("%Y-%m-%d")}, last observation {oc.stats.dates_last_obs.max().strftime("%Y-%m-%d")}')
     logging.info(
-        f'Obs Collection has on average {df_period_obs_approx_years.mean():.1f} years of observations per monitoring well, median {df_period_obs_approx_years.median():.1f} years. Assuming observations interval each {expected_obs_interval} minutes.')
+        f'Obs Collection has {len(oc)} monitoring wells, on {oc.location.unique().size} locations.')
+    oc_no_obs = oc.stats.get_no_of_observations() == 0
+    logging.info(
+        f'{oc_no_obs.sum()} monitoring wells have no observations, {len(oc) - oc_no_obs.sum()} have observations.')
+
+    oc_with_obs = oc[~oc_no_obs]
+    if len(oc_with_obs) > 0:
+        expected_obs_per_day = (24 * 60) / expected_obs_interval
+        df_period_obs_approx_years = (
+            oc_with_obs.stats.get_no_of_observations() / (expected_obs_per_day))/365
+        logging.info(
+            f'First observation {oc_with_obs.stats.dates_first_obs.min().strftime("%Y-%m-%d")}, last observation {oc_with_obs.stats.dates_last_obs.max().strftime("%Y-%m-%d")}')
+        logging.info(
+            f'Obs Collection has on average {df_period_obs_approx_years.mean():.1f} years of observations per monitoring well, median {df_period_obs_approx_years.median():.1f} years. Assuming observations interval each {expected_obs_interval} minutes.')
 
     logging.info(
         f'Data X: {describe_range(oc.x.min(), oc.x.max())}, Y: {describe_range(oc.y.min(), oc.y.max())}')
@@ -175,7 +184,7 @@ def add_points_to_map(axis, df, profile_line, buffer, dp_list, plot_col='dp', an
             )
 
 
-def plot_geoprofile(cols,  df_hm, dp_list,  oc_gwl=None, buffer=100, projectname=None, width=1900, height=937, dp_format='.1f', title_suffix='', profile_line=None, plot_path=None, ylims=None, groundwater_level=False, surface_level=False, region='Os', auto_open=True):
+def plot_geoprofile(cols,  df_hm, dp_list,  oc_gwl=None, buffer=100, projectname=None, width=1900, height=937, dp_format='.1f', title_suffix='', profile_line=None, plot_path=None, ylims=None, groundwater_level=False, surface_level=False, region='Os', auto_open=True, write_image=True):
     """
     Plot a geoprofile along a dike trajectory using soil and groundwater data.
     Args:
@@ -255,21 +264,15 @@ def plot_geoprofile(cols,  df_hm, dp_list,  oc_gwl=None, buffer=100, projectname
     if ylims is not None:
         fig.update_yaxes(range=ylims)
 
-    # fig.update_layout(title_text=projectname + title_suffix)
-    # _ = plotly.offline.plot(
-    #    fig, filename=f"{plot_path}{projectname}_webpage.html")
-
-    # fig.write_image(f"{plot_path}{projectname}_profile.png",
-    #                width=width, height=height)
-
     fig.update_layout(title_text=projectname + title_suffix)
 
     fn = f"{plot_path}{projectname}_profile.html"
     pio.write_html(fig, file=fn, auto_open=auto_open)
-    fig.write_image(
-        fn.replace('.html', '.png'),
-        width=width, height=height
-    )
+    if write_image:
+        fig.write_image(
+            fn.replace('.html', '.png'),
+            width=width, height=height
+        )
 
     return fig, profile
 
@@ -399,7 +402,7 @@ def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1,
     return closest_dp_profile
 
 
-def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, df_gmw=None, delta_dp=1, width=1900, height=1200, region='Os', xmin=-30, xmax=20, plot_path=r'plot\\', plot_gwl=False, ylims_upper=None, auto_open=True):
+def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, df_gmw=None, delta_dp=1, width=1900, height=1200, region='Os', xmin=-30, xmax=20, plot_path=r'plot\\', plot_gwl=False, ylims_upper=None, auto_open=True, write_image=True):
 
     # prepare groundwater data
     oc_gwl_plot = oc_gwl.loc[oc_gwl.dp.between(
@@ -443,6 +446,10 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
     if plot_gwl:
         # plot observations in separate subplot
         for index, row in oc_gwl_plot.iterrows():
+            if row.obs.empty:
+                logging.info(
+                    f"No observations for {index} dp{row.dp:.1f}, skipping plot.")
+                continue
             # mean in upper plot
             fig.add_trace(
                 go.Scatter(
@@ -452,7 +459,6 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
                     mode="lines",
                     line=dict(color=row.plot_color, width=4) if hasattr(
                         row, 'plot_color') else dict(color='black', width=4),
-                    # name=f'pb {row.position}<BR>dp{row.dp}, {row.timeseries_id}<BR>gem:{row.obs.gwl_mnap.mean():.2f} over {row.obs.index.year.min()}-{row.obs.index.year.max()}',
                     showlegend=False,
                 ),
                 row=1,
@@ -465,7 +471,6 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
                     y=row.obs.gwl_mnap,
                     mode="lines",
                     line=dict(color=row['plot_color'], width=2),
-                    # {row.timeseries_id}
                     name=f'pb {row.position} dp{row.dp} {row.filter_letter}',
                 ),
                 row=2,
@@ -511,12 +516,12 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
 
     fn = fr"{plot_path}\profiel_dp{int(dp_center):04d}__plusmin{delta_dp}_{fig_rows}plots.html"
     pio.write_html(fig, file=fn, auto_open=auto_open)
-    fig.write_image(fn.replace('.html', '.png'),
-                    width=width, height=height)
+    if write_image:
+        fig.write_image(fn.replace('.html', '.png'),
+                        width=width, height=height)
     return fig, fn
 
 
-# def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, delta_dp=1, width=1900, height=937, region='Os', xmin=-30, xmax=30, plot_path=r'plot\\'):
 def plot_section_for_dp(fig, dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, delta_dp=1, region='Os', xmin=-30, xmax=30, fig_row=1, fig_col=1):
     """
     Create a Plotly figure for a specific dike pole, including soil, surface, and groundwater profiles.
@@ -530,6 +535,7 @@ def plot_section_for_dp(fig, dp_center, df_meta_deltaversterking, geoprofile_col
         plot_path: Path for saving plot
         xmin: Minimum x-axis value
         xmax: Maximum x-axis value
+        write_image: Whether to write the plot as an image
     Returns:
         fig: Plotly figure object
         fn: Filename of saved plot
@@ -588,7 +594,7 @@ def plot_section_for_dp(fig, dp_center, df_meta_deltaversterking, geoprofile_col
 # fig.update_xaxes(autorange="reversed")
 
 
-def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
+def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None, plot_groundlevel_cpt=False):
     """
     Plot geoprofile columns in a Plotly figure, highlighting specified dike poles.
     Args:
@@ -626,20 +632,32 @@ def plot_colums_in_figure(geoprofile_cols_subset, figure, dp_highlight=None):
             d_right=0.1,
             profile=True,
         )
-        # plot marker at z
-        show_name = plotted_x == [plot_x]
-        figure.add_trace(
-            go.Scatter(
-                x=[plot_x],
-                y=[col.z],
-                mode="markers",
-                marker=dict(color="darkgray", size=10),
-                showlegend=show_name,
-                name='maaiveld sondering' if show_name else None,  # add label for legend only once
-            ),
-            row=1,
-            col=1,
-        )
+        if col.predrilled_depth > 0:
+            # plot marker at predrilled depth
+            figure.add_trace(
+                go.Scatter(
+                    x=[plot_x]*2,
+                    y=[col.z, col.z - col.predrilled_depth],
+                    mode="lines",
+                    line=dict(color='magenta', width=4, dash='dash'),
+                    name=f'dp {col.dp} voorgeboord {col.predrilled_depth:.1f}m',
+                )
+            )
+        if plot_groundlevel_cpt:
+            # plot marker at z
+            show_name = plotted_x == [plot_x]
+            figure.add_trace(
+                go.Scatter(
+                    x=[plot_x],
+                    y=[col.z],
+                    mode="markers",
+                    marker=dict(color="darkgray", size=10),
+                    showlegend=show_name,
+                    name='maaiveld sondering' if show_name else None,  # add label for legend only once
+                ),
+                row=1,
+                col=1,
+            )
         figure.add_annotation(
             x=plot_x,
             y=col.z,
@@ -772,13 +790,12 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                         line=dict(color=row.plot_color, width=10) if hasattr(
                             row, 'plot_color') else dict(color=dp_alternative_color, width=10),
                         name=row.label if hasattr(
-                            # {row.timeseries_id}'
                             row, 'label') else f'pb {row.position} dp{row.dp} {row.filter_letter}',
                     ),
                     row=fig_row,
                     col=fig_col,
                 )
-    if method == 'by_dp_marker':
+    elif method == 'by_dp_marker':
         oc['screen_mid'] = oc[['screen_top', 'screen_bottom']].mean(axis=1)
         counter = 0
         for index, row in oc.iterrows():
@@ -804,18 +821,20 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
     elif method == 'geoprofile':
         for index, row in oc.iterrows():
             # color is purple when posititon == kruin; color limegreen when position is binnenteen or binnenberm
-            if row.position == 'kruin':
+            if row.position in ['kruin', 'KR']:
                 color = 'purple'
                 offset = 0
-            elif row.position in ['binnenteen', 'binnenberm']:
+            elif row.position in ['binnenteen', 'binnenberm', 'BIT', 'BIB']:
                 color = 'limegreen'
                 offset = 10
-            elif row.position == 'buitenberm':
+            elif row.position in ['buitenberm', 'BUB']:
                 color = 'orange'
                 offset = -10
             else:
                 color = 'gray'
                 offset = 15
+            if row.timeseries_id is None:
+                row.timeseries_id = 'geen meting'
             fig.add_trace(
                 go.Scatter(
                     # x=[row.distance_to_ref, row.distance_to_ref],
