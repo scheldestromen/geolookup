@@ -143,7 +143,7 @@ def profile_line_from_dps(df_hm, dp_list, distance_col='dp', distance_factor=100
         return line
 
 
-def add_points_to_map(axis, df, profile_line, buffer, dp_list, plot_col='dp', annotate=False, marker='o', color='red', markersize=30, label='_nolegend'):
+def add_points_to_map(axis, df, profile_line, buffer, dp_list, plot_col='dp', annotate=False, marker='o', color='red', markersize=10, label='_nolegend'):
     bounds = profile_line.bounds
 
     df_subset = df[
@@ -232,7 +232,7 @@ def plot_geoprofile(cols,  df_hm, dp_list,  oc_gwl=None, buffer=100, projectname
             min(dp_list), max(dp_list)) & (oc_gwl.region == region)
         ]
         add_points_to_map(axis, oc_gwl_plot, profile_line, buffer,
-                          dp_list, plot_col='dp', annotate=True, marker='s', color='blue', markersize=20, label='peilbuis')
+                          dp_list, plot_col='dp', annotate=True, marker='s', color='blue', label='peilbuis')
 
     axis.legend(loc='best')
     plt.savefig(f"{plot_path}{projectname}_map.png")
@@ -402,8 +402,30 @@ def select_and_plot_surfacelevelprofile(dp_center, fig, df_profiles, delta_dp=1,
     return closest_dp_profile
 
 
-def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, df_gmw=None, delta_dp=1, width=1900, height=1200, region='Os', xmin=-30, xmax=20, plot_path=r'plot\\', plot_gwl=False, ylims_upper=None, auto_open=True, write_image=True):
-
+def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, df_profiles, oc_gwl, delta_dp=1, width=1900, height=1200, region='Os', xmin=-30, xmax=20, plot_path=r'plot\\', plot_gwl=False, ylims_upper=None, auto_open=True, write_image=True):
+    """
+    Create a Plotly figure for a specific dike pole, including soil, surface, and groundwater profiles, and optionally groundwater monitoring wells.
+    Args:
+        dp_center: Central dike pole number
+        df_meta_deltaversterking: DataFrame with Deltaversterking metadata
+        geoprofile_cols: List of geoprofile columns
+        df_profiles: DataFrame with surface level profiles
+        oc_gwl: Object containing groundwater levels
+        delta_dp: Range around central dike pole
+        width: Width of output image
+        height: Height of output image
+        region: Region name
+        xmin: Minimum x-axis value
+        xmax: Maximum x-axis value
+        plot_path: Path for saving plot
+        plot_gwl: Whether to plot groundwater levels in a separate subplot
+        ylims_upper: Y-axis limits for upper plot
+        auto_open: Whether to auto-open the plot
+        write_image: Whether to write the plot as an image
+    Returns:
+        fig: Plotly figure object
+        fn: Filename of saved plot
+    """
     # prepare groundwater data
     oc_gwl_plot = oc_gwl.loc[oc_gwl.dp.between(
         dp_center - delta_dp, dp_center + delta_dp
@@ -427,21 +449,6 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
 
     plot_section_for_dp(fig, dp_center=dp_center, df_meta_deltaversterking=df_meta_deltaversterking, geoprofile_cols=geoprofile_cols,
                         df_profiles=df_profiles, oc_gwl=oc_gwl_plot, delta_dp=delta_dp, region=region, xmin=xmin, xmax=xmax, fig_row=1, fig_col=1)
-
-    if df_gmw is not None:
-        df_plot = df_gmw.loc[df_gmw.dp.between(
-            dp_center - delta_dp, dp_center + delta_dp) & (df_gmw.region == region)]
-        logging.debug(f'gmw worden geplot, aantal: {len(df_plot)}')
-        plot_standpipes_in_fig(
-            fig,
-            df_plot,
-            [dp_center - delta_dp, dp_center, dp_center + delta_dp],
-            dp_center,
-            dp_alternative_color='fuchsia',
-            method='by_dp_marker',
-        )
-    else:
-        logging.debug('gmw worden niet geplot')
 
     if plot_gwl:
         # plot observations in separate subplot
@@ -863,8 +870,6 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
                 row=fig_row,
                 col=fig_col,
             )
-            print(row.dp * 100 + offset, row.tube_top)
-            # fig.add_scatter(
             fig.add_trace(
                 go.Scatter(
                     x=[row.dp * 100 + offset],
@@ -884,3 +889,55 @@ def plot_standpipes_in_fig(fig, oc, dp_list=None, dp_center=None, color_center='
     else:
         logging.warning(
             f'Unknown method {method} for plotting stand pipes. Nothing plotted.')
+
+
+def filter_relevant_dps(df_section, oc_gwl, filter_col='dp', region='Os', filter_distance=1):
+    """
+    Filter and return relevant dike pole locations that are present in both section and groundwater level data, optionally filtering out locations that are too close to each other.
+    Args:
+        df_section: DataFrame containing section data with region and dike pole columns
+        oc_gwl: DataFrame containing groundwater level data with region and dike pole columns
+        filter_col: Column name for dike pole reference (default 'dp')
+        region: Region name to filter on (default 'Os')
+        filter_distance: Minimum allowed distance between selected locations (default 1)
+    Returns:
+        final_locs: List or array of filtered, unique dike pole locations
+    """
+    # get locations where sections are present
+    sel_sections = df_section.loc[df_section.region ==
+                                  region, filter_col].values
+    logging.info(
+        f"In df_sections are {len(sel_sections)} locations ({', '.join(str(dp) for dp in sel_sections)})")
+
+    # get locations where groundwater levels are present
+    sel_obs = oc_gwl.loc[oc_gwl.region == region, filter_col].unique()
+    logging.info(
+        f"In oc_gwl are {len(sel_obs)} locations ({', '.join(str(dp) for dp in sel_obs)})")
+
+    # get unique locations from both
+    sel_both = []
+    for item in [sel_sections, sel_obs]:
+        item = np.round(item).astype(int)
+        item = np.unique(item)
+        sel_both.append(item)
+    # get unique values from all sublists in sel_both
+    unique_locs = np.unique(np.concatenate(sel_both))
+    logging.info(
+        f"In total there are {len(unique_locs)} unique locations ({', '.join(str(dp) for dp in unique_locs)})")
+
+    if filter_distance > 0:
+        logging.info(
+            f"Filtering locations that are closer than {filter_distance} unit (usually dp) from each other")
+        final_locs = []
+
+        for dp in unique_locs:
+            if len(final_locs) == 0:
+                final_locs.append(dp)
+            else:
+                if dp - final_locs[-1] > filter_distance:
+                    final_locs.append(dp)
+        logging.info(
+            f"After filtering, there are {len(final_locs)} locations ({', '.join(str(dp) for dp in final_locs)})")
+        return final_locs
+    else:
+        return unique_locs
