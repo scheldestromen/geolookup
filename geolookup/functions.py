@@ -452,6 +452,10 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
 
     if plot_gwl:
         # plot observations in separate subplot
+        obs_index_min = pd.Timestamp.now().tz_localize('Europe/Amsterdam') + pd.Timedelta(days=365 *
+                                                                                          100)  # far in the future
+        obs_index_max = pd.Timestamp.now().tz_localize('Europe/Amsterdam') - \
+            pd.Timedelta(days=365*100)  # far in the past
         for index, row in oc_gwl_plot.iterrows():
             if row.obs.empty:
                 logging.info(
@@ -483,11 +487,14 @@ def create_figure_for_dp(dp_center, df_meta_deltaversterking, geoprofile_cols, d
                 row=2,
                 col=1,
             )
-            fig.update_xaxes(
-                range=[row.obs.index.min(), row.obs.index.max()],
-                row=2,
-                col=1,
-            )
+            obs_index_min = min(obs_index_min, row.obs.index.min())
+            obs_index_max = max(obs_index_max, row.obs.index.max())
+
+        fig.update_xaxes(
+            range=[obs_index_min, obs_index_max],
+            row=2,
+            col=1,
+        )
         fig.update_yaxes(title_text="grondwaterstand (m NAP)", row=2, col=1)
 
     fig.update_yaxes(title_text="(m NAP)", row=1, col=1)
