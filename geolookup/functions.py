@@ -575,7 +575,8 @@ def plot_section_for_dp(fig, dp_center, df_meta_deltaversterking, geoprofile_col
         [col for col in geoprofile_cols_subset if col.dp != dp_center]
     )
     plot_colums_in_figure(geoprofile_cols_subset, fig,
-                          dp_highlight=[dp_center])
+                          # dp_highlight=[dp_center])
+                          dp_highlight=dp_center)
 
     # PLOT SURFACE LEVEL PROFILE
     closest_dp_profile = select_and_plot_surfacelevelprofile(
