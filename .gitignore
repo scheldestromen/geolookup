@@ -9,6 +9,8 @@
 *.JPG
 *.pyc
 *.html
+# except the GitHub Pages site
+!site/*.html
 thumbs.db
 
 # ignore large file with all groundwater observations

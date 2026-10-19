@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sonderingen N27-2 | Waterschap Scheldestromen</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css">
+<style>
+  :root {
+    /* From the Scheldestromen logo: its blue for the header and links, its grey-brown for secondary text. */
+    --brand: #3C68AF;
+    --brand-light: #62B4EC;
+    --muted: #7F7267;
+    --ink: #1f2933;
+    --bg: #ffffff;
+    --warn-bg: #fff4d6;
+    --warn-ink: #7a4b00;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color: var(--ink); background: var(--bg);
+  }
+  header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 4px solid var(--brand);
+  }
+  header img { height: 36px; width: auto; }
+  header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; color: var(--brand); }
+  header .sub { color: var(--muted); font-size: 0.85rem; }
+  #notice { display: none; padding: 8px 16px; background: var(--warn-bg); color: var(--warn-ink); font-size: 0.9rem; }
+  #notice.show { display: block; }
+  main { position: relative; flex: 1; min-height: 0; }
+  #map { position: absolute; inset: 0; }
+  #legend {
+    position: absolute; left: 10px; bottom: 30px; max-width: calc(100% - 20px);
+    background: rgba(255, 255, 255, 0.95); border-radius: 4px; padding: 8px 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25); font-size: 0.85rem;
+  }
+  #legend h2 { margin: 0 0 4px; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+  #legend .row { display: flex; align-items: center; gap: 6px; line-height: 1.5; }
+  #legend .dot { width: 10px; height: 10px; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.3); flex: none; }
+  #legend .n { color: var(--muted); margin-left: auto; padding-left: 8px; }
+  .maplibregl-popup-content { font-size: 0.85rem; line-height: 1.45; }
+  .maplibregl-popup-content b { color: var(--brand); }
+  .maplibregl-popup-content .uid { color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <img src="logo-scheldestromen.svg" alt="Waterschap Scheldestromen">
+  <div>
+    <h1>Sonderingen N27-2</h1>
+    <div class="sub" id="sub">Gegevens laden…</div>
+  </div>
+</header>
+<div id="notice" role="status"></div>
+<main>
+  <div id="map"></div>
+  <div id="legend" hidden></div>
+</main>
+
+<script type="module">
+import maplibregl from "https://cdn.jsdelivr.net/npm/maplibre-gl@5/+esm";
+// The `latest` dist-tag, not a semver range: duckdb-wasm ships as 1.33.1-devNN prereleases, which
+// a range like @1 skips, and that falls back to DuckDB 1.4, too old to read the 1.5 catalog.
+import * as duckdb from "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm/+esm";
+
+const LAKE = "https://r2.eu.bedrock.engineer/scheldestromen/geotech-database.ducklake";
+const STATUS = "https://r2.eu.bedrock.engineer/scheldestromen/status.json";
+// The sync runs every 15 minutes, so an hour without a check means it has stopped.
+const STATUS_MAX_AGE_MS = 60 * 60 * 1000;
+// Okabe-Ito, colour-blind safe. Kept apart from the brand blues on purpose.
+const PALETTE = ["#E69F00", "#009E73", "#CC79A7", "#D55E00", "#0072B2", "#56B4E9", "#F0E442", "#000000"];
+const NO_SENSORS = "#3C68AF";
+
+const $ = (id) => document.getElementById(id);
+const notice = (text) => { $("notice").textContent = text; $("notice").classList.add("show"); };
+const fmt = (v, digits) => (v == null ? "–" : digits == null ? String(v) : Number(v).toFixed(digits));
+const when = (iso) => new Date(iso).toLocaleString("nl-NL", { dateStyle: "medium", timeStyle: "short" });
+
+// PDOK BRT-Achtergrondkaart first, OpenStreetMap underneath as the fallback when PDOK fails.
+const map = new maplibregl.Map({
+  container: "map",
+  center: [3.85, 51.45],
+  zoom: 9,
+  style: {
+    version: 8,
+    sources: {
+      pdok: {
+        type: "raster", tileSize: 256, maxzoom: 19,
+        tiles: ["https://service.pdok.nl/brt/achtergrondkaart/wmts/v2_0/standaard/EPSG:3857/{z}/{x}/{y}.png"],
+        attribution: "Kaartgegevens &copy; <a href=\"https://www.kadaster.nl\">Kadaster</a>",
+      },
+      osm: {
+        type: "raster", tileSize: 256, maxzoom: 19,
+        tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+        attribution: "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap-bijdragers</a>",
+      },
+    },
+    layers: [
+      { id: "osm", type: "raster", source: "osm", layout: { visibility: "none" } },
+      { id: "pdok", type: "raster", source: "pdok" },
+    ],
+  },
+});
+// Made now, before the data is awaited, so a load event that fires first is not missed.
+const mapReady = new Promise((resolve) => map.once("load", resolve));
+map.addControl(new maplibregl.NavigationControl(), "top-right");
+map.addControl(new maplibregl.ScaleControl(), "bottom-right");
+
+let pdokFailed = false;
+map.on("error", (e) => {
+  if (pdokFailed || e.sourceId !== "pdok") return;
+  pdokFailed = true;
+  map.setLayoutProperty("pdok", "visibility", "none");
+  map.setLayoutProperty("osm", "visibility", "visible");
+});
+
+async function checkStatus() {
+  try {
+    const res = await fetch(STATUS, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const s = await res.json();
+    if (s.status !== "ok") {
+      notice(`De laatste synchronisatie is mislukt; de kaart toont de stand van ${when(s.synced_at)}.`);
+    } else if (Date.now() - new Date(s.checked_at) > STATUS_MAX_AGE_MS) {
+      notice(`De gegevens zijn sinds ${when(s.checked_at)} niet meer gecontroleerd en kunnen achterlopen.`);
+    }
+    return s;
+  } catch {
+    notice("De status van de gegevens is niet te lezen; ze kunnen achterlopen.");
+    return null;
+  }
+}
+
+async function connect() {
+  const bundle = await duckdb.selectBundle(duckdb.getJsDelivrBundles());
+  const workerUrl = URL.createObjectURL(
+    new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" })
+  );
+  const db = new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(duckdb.LogLevel.WARNING), new Worker(workerUrl));
+  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  URL.revokeObjectURL(workerUrl);
+  const conn = await db.connect();
+  await conn.query("LOAD ducklake");
+  await conn.query(`ATTACH 'ducklake:${LAKE}' AS geotech (READ_ONLY)`);
+  return conn;
+}
+
+// The same fields as the notebooks' map hover (cpt_hover in N27-2's cpt_plot_mo.py).
+// cpt_sensors is optional: until the DuckLake carries it, the points are drawn in one colour.
+async function readLocations(conn) {
+  const base = `
+    SELECT l.location_uid, l.bro_id, l.object_id_accountable_party, l.final_depth, l.lon, l.lat,
+           c.dijkpaal, c.distance_to_ref%SENSORS%
+    FROM geotech.gi.location l
+    LEFT JOIN geotech.gi.dike_chainage c USING (location_uid)%JOIN%
+    WHERE l.lon IS NOT NULL AND l.lat IS NOT NULL`;
+  try {
+    const sql = base
+      .replace("%SENSORS%", ", array_to_string(s.sensors, ', ') AS sensors")
+      .replace("%JOIN%", "\n    LEFT JOIN geotech.gi.cpt_sensors s USING (location_uid)");
+    return { rows: (await conn.query(sql)).toArray(), hasSensors: true };
+  } catch (err) {
+    if (!/cpt_sensors/.test(String(err))) throw err;
+    const sql = base.replace("%SENSORS%", "").replace("%JOIN%", "");
+    return { rows: (await conn.query(sql)).toArray(), hasSensors: false };
+  }
+}
+
+function toGeoJSON(rows, colorOf) {
+  return {
+    type: "FeatureCollection",
+    features: rows.map((r) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [r.lon, r.lat] },
+      properties: {
+        location_uid: r.location_uid,
+        bro_id: r.bro_id,
+        object_id: r.object_id_accountable_party,
+        sensors: r.sensors ?? null,
+        final_depth: r.final_depth,
+        dijkpaal: r.dijkpaal,
+        distance_to_ref: r.distance_to_ref,
+        color: colorOf(r.sensors),
+      },
+    })),
+  };
+}
+
+function renderLegend(groups) {
+  const legend = $("legend");
+  legend.replaceChildren();
+  const h = document.createElement("h2");
+  h.textContent = "CPT-sensoren";
+  legend.append(h);
+  for (const [label, color, n] of groups) {
+    const row = document.createElement("div");
+    row.className = "row";
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.style.background = color;
+    const name = document.createElement("span");
+    name.textContent = label;
+    const count = document.createElement("span");
+    count.className = "n";
+    count.textContent = n;
+    row.append(dot, name, count);
+    legend.append(row);
+  }
+  legend.hidden = false;
+}
+
+function popupContent(p) {
+  const div = document.createElement("div");
+  const title = document.createElement("div");
+  const b = document.createElement("b");
+  b.textContent = p.bro_id ?? p.location_uid;
+  title.append(b, ` (${p.object_id ?? "–"})`);
+  const line1 = document.createElement("div");
+  line1.textContent = `${p.sensors ?? "sensoren onbekend"} · einddiepte ${fmt(p.final_depth, 1)} m`;
+  const line2 = document.createElement("div");
+  line2.textContent = `dijkpaal ${fmt(p.dijkpaal)} · afstand tot referentielijn ${fmt(p.distance_to_ref, 1)} m`;
+  const uid = document.createElement("div");
+  uid.className = "uid";
+  uid.textContent = p.location_uid;
+  div.append(title, line1, line2, uid);
+  return div;
+}
+
+const [status, data] = await Promise.all([
+  checkStatus(),
+  connect().then(readLocations).catch((err) => {
+    console.error(err);
+    $("sub").textContent = "De gegevens konden niet worden geladen.";
+    notice(`Fout bij het lezen van de DuckLake: ${err.message ?? err}`);
+    return null;
+  }),
+]);
+
+if (data) {
+  const { rows, hasSensors } = data;
+  let colorOf = () => NO_SENSORS;
+  if (hasSensors) {
+    const counts = new Map();
+    for (const r of rows) counts.set(r.sensors ?? "onbekend", (counts.get(r.sensors ?? "onbekend") ?? 0) + 1);
+    const sorted = [...counts].sort((a, b) => b[1] - a[1]);
+    const colors = new Map(sorted.map(([k], i) => [k, PALETTE[i % PALETTE.length]]));
+    colorOf = (s) => colors.get(s ?? "onbekend");
+    renderLegend(sorted.map(([k, n]) => [k, colors.get(k), n]));
+  } else {
+    notice("De sensoren staan nog niet in de DuckLake; alle sonderingen hebben daarom één kleur.");
+  }
+
+  const sub = `${rows.length.toLocaleString("nl-NL")} sonderingen`;
+  $("sub").textContent = status?.synced_at ? `${sub} · bijgewerkt ${when(status.synced_at)}` : sub;
+
+  await mapReady;
+  map.addSource("locations", { type: "geojson", data: toGeoJSON(rows, colorOf) });
+  map.addLayer({
+    id: "locations", type: "circle", source: "locations",
+    paint: {
+      "circle-color": ["get", "color"],
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 3, 14, 7],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 1,
+    },
+  });
+  const bounds = new maplibregl.LngLatBounds();
+  for (const r of rows) bounds.extend([r.lon, r.lat]);
+  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 40, duration: 0 });
+
+  map.on("mouseenter", "locations", () => (map.getCanvas().style.cursor = "pointer"));
+  map.on("mouseleave", "locations", () => (map.getCanvas().style.cursor = ""));
+  map.on("click", "locations", (e) => {
+    const f = e.features[0];
+    new maplibregl.Popup({ maxWidth: "320px" })
+      .setLngLat(f.geometry.coordinates)
+      .setDOMContent(popupContent(f.properties))
+      .addTo(map);
+  });
+}
+</script>
+</body>
+</html>
