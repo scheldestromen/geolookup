@@ -86,6 +86,10 @@ const map = new maplibregl.Map({
   container: "map",
   center: [3.85, 51.45],
   zoom: 9,
+  // A flat map: no tilt by right-drag, ctrl-drag or two-finger drag.
+  maxPitch: 0,
+  pitchWithRotate: false,
+  touchPitch: false,
   style: {
     version: 8,
     sources: {
