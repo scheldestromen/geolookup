@@ -49,7 +49,7 @@
   #legend .n { color: var(--muted); margin-left: auto; padding-left: 8px; }
   .maplibregl-popup-content { font-size: 0.85rem; line-height: 1.45; }
   .maplibregl-popup-content b { color: var(--brand); }
-  .maplibregl-popup-content .uid { color: var(--muted); font-size: 0.8rem; }
+  .maplibregl-popup-content a { color: inherit; }
 </style>
 </head>
 <body>
@@ -226,16 +226,22 @@ function popupContent(p) {
   const div = document.createElement("div");
   const title = document.createElement("div");
   const b = document.createElement("b");
-  b.textContent = p.bro_id ?? p.location_uid;
+  if (p.bro_id) {
+    const a = document.createElement("a");
+    a.href = `https://bro.bedrock.engineer/${encodeURIComponent(p.bro_id)}`;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = p.bro_id;
+    b.append(a);
+  } else {
+    b.textContent = p.location_uid;
+  }
   title.append(b, ` (${p.object_id ?? "–"})`);
   const line1 = document.createElement("div");
   line1.textContent = `${p.sensors ?? "sensoren onbekend"} · einddiepte ${fmt(p.final_depth, 1)} m`;
   const line2 = document.createElement("div");
   line2.textContent = `dijkpaal ${fmt(p.dijkpaal)} · afstand tot referentielijn ${fmt(p.distance_to_ref, 1)} m`;
-  const uid = document.createElement("div");
-  uid.className = "uid";
-  uid.textContent = p.location_uid;
-  div.append(title, line1, line2, uid);
+  div.append(title, line1, line2);
   return div;
 }
 
